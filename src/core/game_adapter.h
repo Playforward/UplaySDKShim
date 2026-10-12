@@ -10,6 +10,7 @@ enum class NetworkApi {
     GetHostByName,
     Socket,
     WSASocketW,
+    Bind,
     Connect,
     Send,
     Recv,
@@ -68,6 +69,10 @@ struct GameAdapter {
 
     DynamicSymbolHook wrap_dynamic_symbol;
     void (*install_debug_hooks)(HMODULE main_module);
+    void (*install_entry_hooks)(HMODULE process_module) = nullptr;
+    uint16_t prudp_listener_port = 0;
+    const char* playforward_title = nullptr;
+    uint16_t launch_port = 0;
 };
 
 const GameAdapter& game_adapter();

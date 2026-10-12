@@ -22,6 +22,10 @@ inline constexpr NetworkBindingDefinition kNetwork[] = {
     {NetworkApi::WSASendTo, nullptr, 116},
     {NetworkApi::AddrInfoLookup, "getaddrinfo", 0},
     {NetworkApi::GetHostByName, nullptr, 52},
+    {NetworkApi::CloseSocket, nullptr, 3},
+    {NetworkApi::WSARecv, "WSARecv", 0},
+    {NetworkApi::WSAGetOverlappedResult, "WSAGetOverlappedResult", 0},
+    {NetworkApi::WSAIoctl, "WSAIoctl", 0},
 };
 inline constexpr TlsHookDefinition kTls{
     0x03e07d00, TlsHookMethod::Int3ReturnTrueAndClearError, 0, 0x17c

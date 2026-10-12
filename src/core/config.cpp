@@ -1,4 +1,6 @@
 #include "core/config.h"
+#include "core/config_line.h"
+#include "core/game_adapter.h"
 #include "core/logging.h"
 
 #include <winsock2.h>
@@ -40,10 +42,17 @@ void assign_bool(const char* key, const char* value, HookConfig& c, bool& known)
     CONFIG_BOOL(capture_uplay)
     CONFIG_BOOL(dump_session_blob)
     CONFIG_BOOL(trace_uplay)
+    CONFIG_BOOL(complete_upc_product_list)
     CONFIG_BOOL(trace_tls_alert)
     CONFIG_BOOL(dump_ssl_jumptable)
     CONFIG_BOOL(trace_invite_dostart)
     CONFIG_BOOL(trace_game_log)
+    CONFIG_BOOL(trace_winhttp)
+    CONFIG_BOOL(trace_net_states)
+    CONFIG_BOOL(nla_report_online)
+    CONFIG_BOOL(menu_autopress)
+    CONFIG_BOOL(online_autologin)
+    CONFIG_BOOL(playforward_launch)
 #undef CONFIG_BOOL
 }
 }
@@ -67,8 +76,16 @@ HookConfig load_hook_config() {
         return config;
     }
 
-    char line[640];
-    while (fgets(line, sizeof(line), file)) {
+    char line[config_line::kCapacity];
+    bool too_long = false;
+    unsigned line_number = 0;
+    while (config_line::read(file, line, too_long)) {
+        ++line_number;
+        if (too_long) {
+            shim_log("[config] line %u is longer than %u bytes and was ignored", line_number,
+                     static_cast<unsigned>(config_line::kCapacity - 1));
+            continue;
+        }
         if (char* comment = strchr(line, '#')) *comment = 0;
         line[strcspn(line, "\r\n")] = 0;
         trim(line);
@@ -87,12 +104,45 @@ HookConfig load_hook_config() {
             in_addr address{};
             if (inet_pton(AF_INET, config.redirect_ip, &address) == 1) config.redirect_ip_be = address.s_addr;
             else shim_log("[config] redirect_ip '%s' is not a valid IPv4 address", value);
+        } else if (_stricmp(key, "bind_ip") == 0) {
+            strncpy_s(config.bind_ip, value, _TRUNCATE);
+            in_addr address{};
+            if (inet_pton(AF_INET, config.bind_ip, &address) == 1) config.bind_ip_be = address.s_addr;
+            else shim_log("[config] bind_ip '%s' is not a valid IPv4 address", value);
         } else if (_stricmp(key, "rva_tls_verify") == 0 || _stricmp(key, "rva_ssl_verify") == 0) {
             config.rva_tls_verify = strtoull(value, nullptr, 0);
         } else if (_stricmp(key, "tls_verify_stack_bytes") == 0 || _stricmp(key, "ssl_verify_stack_bytes") == 0) {
             config.tls_verify_stack_bytes = static_cast<uint32_t>(strtoul(value, nullptr, 0));
+        } else if (_stricmp(key, "tls_pin_sha256") == 0) {
+            if (!tls_pin::parse_pins(value, config.tls_pins, HookConfig::kMaxTlsPins, config.tls_pin_count)) {
+                config.tls_pin_count = 0;
+                shim_log("[config] tls_pin_sha256 must be 1 to %u comma-separated base64 SHA-256 pins; ignored",
+                         static_cast<unsigned>(HookConfig::kMaxTlsPins));
+            }
         } else if (_stricmp(key, "trace_points") == 0) {
             strncpy_s(config.trace_points, value, _TRUNCATE);
+        } else if (_stricmp(key, "launch_port") == 0) {
+            const unsigned long port = strtoul(value, nullptr, 0);
+            if (port == 0 || port > 65535) shim_log("[config] launch_port '%s' is not a port", value);
+            else config.launch_port = static_cast<uint16_t>(port);
+        } else if (_stricmp(key, "prudp_port") == 0) {
+            const unsigned long port = strtoul(value, nullptr, 0);
+            if (port > 65535) shim_log("[config] prudp_port '%s' is not a port", value);
+            else config.prudp_port = static_cast<uint16_t>(port);
+        } else if (_stricmp(key, "bridge_port") == 0) {
+            const unsigned long port = strtoul(value, nullptr, 0);
+            if (port > 65535) shim_log("[config] bridge_port '%s' is not a port", value);
+            else config.bridge_port = static_cast<uint16_t>(port);
+        } else if (_stricmp(key, "launch_pipe") == 0) {
+            if (!value[0] || strlen(value) >= sizeof(config.launch_pipe))
+                shim_log("[config] launch_pipe must be 1 to %u characters and was ignored",
+                         static_cast<unsigned>(sizeof(config.launch_pipe) - 1));
+            else strncpy_s(config.launch_pipe, value, _TRUNCATE);
+        } else if (_stricmp(key, "login_name") == 0) {
+            if (strlen(value) >= sizeof(config.login_name))
+                shim_log("[config] login_name is longer than %u characters and was ignored",
+                         static_cast<unsigned>(sizeof(config.login_name) - 1));
+            else strncpy_s(config.login_name, value, _TRUNCATE);
         } else {
             shim_log("[config] unknown key '%s' ignored", key);
         }
@@ -102,7 +152,15 @@ HookConfig load_hook_config() {
 }
 
 void log_hook_config(const HookConfig& c) {
-    shim_log("[config] redirect_ip=%s redirect_all_dns=%d bypass_tls_verify=%d rva_tls_verify=0x%llx",
-             c.redirect_ip[0] ? c.redirect_ip : "-", static_cast<int>(c.redirect_all_dns),
-             static_cast<int>(c.bypass_tls_verify), static_cast<unsigned long long>(c.rva_tls_verify));
+    const GameAdapter& game = game_adapter();
+    shim_log("[config] redirect_ip=%s bind_ip=%s redirect_all_dns=%d bypass_tls_verify=%d rva_tls_verify=0x%llx tls_pins=%u login_name=%s "
+             "playforward_launch=%d launch_port=%u prudp_port=%u launch_pipe=%s bridge_port=%u",
+             c.redirect_ip[0] ? c.redirect_ip : "-", c.bind_ip[0] ? c.bind_ip : "-", static_cast<int>(c.redirect_all_dns),
+             static_cast<int>(c.bypass_tls_verify), static_cast<unsigned long long>(c.rva_tls_verify),
+             static_cast<unsigned>(c.tls_pin_count),
+             c.login_name[0] ? c.login_name : "-",
+             static_cast<int>(c.playforward_launch),
+             static_cast<unsigned>(c.launch_port ? c.launch_port : game.launch_port),
+             static_cast<unsigned>(c.prudp_port ? c.prudp_port : game.prudp_listener_port), c.launch_pipe,
+             static_cast<unsigned>(c.bridge_port));
 }

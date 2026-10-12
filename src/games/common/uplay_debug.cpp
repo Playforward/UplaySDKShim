@@ -22,15 +22,22 @@ UplayGeneric g_get_full_members = nullptr;
 UplayGeneric g_get_ingame_members = nullptr;
 UplayGeneric g_set_user_data = nullptr;
 
+const char* g_main_module = "FC_m64.dll";
+
+const char* main_module_for(const char* game_id) {
+    if (game_id && strcmp(game_id, "fc3") == 0) return "FC3_d3d11.dll";
+    return "FC_m64.dll";
+}
+
 bool readable(const void* value, size_t length) {
     return value && !IsBadReadPtr(value, length);
 }
 
 void log_caller(const char* name, void* return_address) {
-    const uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleA("FC_m64.dll"));
+    const uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleA(g_main_module));
     const uintptr_t caller = reinterpret_cast<uintptr_t>(return_address);
     if (base && caller >= base && caller < base + 0x20000000ULL)
-        shim_log("[uplay] %s caller FC_m64+0x%llx", name,
+        shim_log("[uplay] %s caller %s+0x%llx", name, g_main_module,
                  static_cast<unsigned long long>(caller - base));
     else
         shim_log("[uplay] %s caller=%p", name, return_address);
@@ -185,6 +192,7 @@ void* known_wrapper(const char* name, void* real) {
 FARPROC wrap_uplay_symbol(const char* game_id, HMODULE, LPCSTR name, FARPROC resolved) {
     if (!name || reinterpret_cast<uintptr_t>(name) <= 0xffff || strncmp(name, "UPLAY_", 6) != 0)
         return resolved;
+    g_main_module = main_module_for(game_id);
     if (!resolved) {
         if (hook_config().trace_uplay) shim_log("[%s:uplay] %s not exported by SDK", game_id, name);
         return resolved;

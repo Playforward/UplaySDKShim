@@ -12,7 +12,10 @@
       "proxy": "binkw32.dll",
       "original": "binkw32_real.dll",
       "profile": "fc3-pc-2018",
-      "modules": ["FC3_d3d11.dll", "FC3.dll"],
+      "modules": [
+        "FC3_d3d11.dll",
+        "FC3.dll"
+      ],
       "tlsVerifierRva": null
     },
     "farcry4": {
@@ -23,7 +26,9 @@
       "proxy": "bink2w64.dll",
       "original": "bink2w64_real.dll",
       "profile": "fc4-fc64-rva-024134f0",
-      "modules": ["FC64.dll"],
+      "modules": [
+        "FC64.dll"
+      ],
       "tlsVerifierRva": "0x024134f0"
     },
     "farcry5": {
@@ -34,7 +39,9 @@
       "proxy": "bink2w64.dll",
       "original": "bink2w64_real.dll",
       "profile": "fc5-fc_m64-rva-03e01eb0",
-      "modules": ["FC_m64.dll"],
+      "modules": [
+        "FC_m64.dll"
+      ],
       "tlsVerifierRva": "0x03e01eb0"
     },
     "farcrynewdawn": {
@@ -45,8 +52,39 @@
       "proxy": "bink2w64.dll",
       "original": "bink2w64_real.dll",
       "profile": "fcnd-fc_m64-67ef9b27",
-      "modules": ["FC_m64.dll"],
+      "modules": [
+        "FC_m64.dll"
+      ],
       "tlsVerifierRva": "0x03e07d00"
+    },
+    "splintercellblacklist": {
+      "name": "Splinter Cell Blacklist",
+      "architecture": "x86",
+      "buildTarget": "splintercellblacklist_shim",
+      "artifact": "splintercellblacklist_shim/bink2w32.dll",
+      "proxy": "bink2w32.dll",
+      "original": "bink2w32_real.dll",
+      "profile": "scbl-pc-2425",
+      "modules": [
+        "Blacklist_DX11_game.exe",
+        "Blacklist_game.exe"
+      ],
+      "installDir": "src/SYSTEM",
+      "tlsVerifierRva": null
+    },
+    "ghostreconfuturesoldier": {
+      "name": "Ghost Recon Future Soldier",
+      "architecture": "x86",
+      "buildTarget": "ghostreconfuturesoldier_shim",
+      "artifact": "ghostreconfuturesoldier_shim/binkw32.dll",
+      "proxy": "binkw32.dll",
+      "original": "binkw32_real.dll",
+      "profile": "grfs-pc-2013",
+      "modules": [
+        "Future Soldier DX11.exe",
+        "Future Soldier DX9.exe"
+      ],
+      "tlsVerifierRva": null
     }
   }
 }

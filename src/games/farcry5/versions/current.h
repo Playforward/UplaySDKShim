@@ -29,6 +29,7 @@ inline constexpr NetworkBindingDefinition kNetwork[] = {
     {NetworkApi::WSASend, "WSASend", 0, ResolverIat | ResolverGetProc},
     {NetworkApi::WSARecv, "WSARecv", 0, ResolverIat | ResolverGetProc},
     {NetworkApi::WSAIoctl, "WSAIoctl", 0, ResolverIat | ResolverGetProc},
+    {NetworkApi::CloseSocket, nullptr, 3, ResolverIat | ResolverGetProc},
 };
 inline constexpr TlsHookDefinition kTls{
     0x03e01eb0, TlsHookMethod::Int3ReturnTrueAndClearError, 0, 0x17c

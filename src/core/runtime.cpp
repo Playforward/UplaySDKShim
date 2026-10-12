@@ -49,11 +49,9 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
         const GameAdapter& game = game_adapter();
         initialize_logging(instance, game.id);
         initialize_hook_config(instance);
-        // Some titles (notably FC5) resolve Winsock almost immediately. Arm
-        // dynamic resolution before the asynchronous full initialization
-        // whenever the game module is already present.
         set_hook_config(load_hook_config());
         configure_networking(game);
+        if (game.install_entry_hooks) game.install_entry_hooks(GetModuleHandleA(nullptr));
         if (early_network_hooks_needed()) {
             if (HMODULE main_module = find_main_module(game)) {
                 shim_log("[runtime] early network resolver setup for %s", game.id);

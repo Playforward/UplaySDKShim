@@ -12,6 +12,12 @@ inline constexpr const char* kHosts[] = {
 inline constexpr NetworkBindingDefinition kNetwork[] = {
     {NetworkApi::AddrInfoLookup, "getaddrinfo", 0, ResolverIat | ResolverGetProc | ResolverExportDetour},
     {NetworkApi::GetHostByName, "gethostbyname", 0, ResolverIat | ResolverGetProc | ResolverExportDetour},
+    {NetworkApi::Connect, "connect", 4, ResolverIat | ResolverGetProc},
+    {NetworkApi::Recv, "recv", 16, ResolverIat | ResolverGetProc},
+    {NetworkApi::CloseSocket, "closesocket", 3, ResolverIat | ResolverGetProc},
+    {NetworkApi::WSARecv, "WSARecv", 0, ResolverIat | ResolverGetProc},
+    {NetworkApi::WSAGetOverlappedResult, "WSAGetOverlappedResult", 0, ResolverIat | ResolverGetProc},
+    {NetworkApi::WSAIoctl, "WSAIoctl", 0, ResolverIat | ResolverGetProc},
 };
 inline constexpr TlsHookDefinition kTls{
     0x024134f0, TlsHookMethod::HardwareBreakpointReturnTrue, 0, 0

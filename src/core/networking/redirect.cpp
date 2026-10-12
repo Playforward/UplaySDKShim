@@ -4,6 +4,8 @@
 #include "core/game_adapter.h"
 #include "core/hooking/iat.h"
 #include "core/logging.h"
+#include "core/networking/tls_observer.h"
+#include "core/playforward/launch_proof.h"
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -11,10 +13,13 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
+#include <unordered_map>
 
 namespace {
 using SocketFn = SOCKET (WSAAPI *)(int, int, int);
 using WSASocketWFn = SOCKET (WSAAPI *)(int, int, int, LPWSAPROTOCOL_INFOW, GROUP, DWORD);
+using BindFn = int (WSAAPI *)(SOCKET, const sockaddr*, int);
 using ConnectFn = int (WSAAPI *)(SOCKET, const sockaddr*, int);
 using SendFn = int (WSAAPI *)(SOCKET, const char*, int, int);
 using RecvFn = int (WSAAPI *)(SOCKET, char*, int, int);
@@ -39,6 +44,7 @@ using GetProcAddressFn = FARPROC (WINAPI *)(HMODULE, LPCSTR);
 const GameAdapter* g_game = nullptr;
 SocketFn g_socket = nullptr;
 WSASocketWFn g_wsasocketw = nullptr;
+BindFn g_bind = nullptr;
 ConnectFn g_connect = nullptr;
 SendFn g_send = nullptr;
 RecvFn g_recv = nullptr;
@@ -62,6 +68,27 @@ bool g_export_hooks_installed = false;
 SOCKET g_tracked[128] = {};
 size_t g_tracked_count = 0;
 SRWLOCK g_tracked_lock = SRWLOCK_INIT;
+
+struct PendingRecv {
+    void* buffer;
+    sockaddr* from;
+    LPINT from_length;
+};
+std::unordered_map<LPWSAOVERLAPPED, PendingRecv> g_pending_recvs;
+SRWLOCK g_pending_recvs_lock = SRWLOCK_INIT;
+
+constexpr DWORD kMaxWatchedReadBuffers = 8;
+struct PendingTlsRead {
+    SOCKET socket;
+    WSABUF buffers[kMaxWatchedReadBuffers];
+    DWORD count;
+};
+std::unordered_map<LPWSAOVERLAPPED, PendingTlsRead> g_pending_tls_reads;
+SRWLOCK g_pending_tls_reads_lock = SRWLOCK_INIT;
+int refuse_read() {
+    WSASetLastError(WSAECONNABORTED);
+    return SOCKET_ERROR;
+}
 
 bool has_resolver(uint32_t resolver) { return g_game && (g_game->resolver_methods & resolver) != 0; }
 
@@ -185,9 +212,76 @@ SOCKET WSAAPI hooked_wsasocketw(int family, int type, int protocol, LPWSAPROTOCO
     return result;
 }
 
+u_short prudp_listener_port() {
+    if (hook_config().prudp_port) return hook_config().prudp_port;
+    return g_game ? g_game->prudp_listener_port : 0;
+}
+
+bool is_wildcard_bind(const sockaddr* address, int length) {
+    if (!address || length < static_cast<int>(sizeof(sockaddr_in)) || address->sa_family != AF_INET) return false;
+    return reinterpret_cast<const sockaddr_in*>(address)->sin_addr.s_addr == htonl(INADDR_ANY);
+}
+
+bool is_prudp_listener_bind(const sockaddr* address, int length) {
+    const u_short port = prudp_listener_port();
+    return port && is_wildcard_bind(address, length) &&
+           reinterpret_cast<const sockaddr_in*>(address)->sin_port == htons(port);
+}
+
+void log_unclassified_bind(SOCKET socket, const sockaddr* address, int length) {
+    const u_short known = prudp_listener_port();
+    if ((known && !hook_config().log_rdv_full) || !is_wildcard_bind(address, length)) return;
+    int type = 0, type_length = sizeof(type);
+    getsockopt(socket, SOL_SOCKET, SO_TYPE, reinterpret_cast<char*>(&type), &type_length);
+    sockaddr_in bound{}; int bound_length = sizeof(bound);
+    u_short port = ntohs(reinterpret_cast<const sockaddr_in*>(address)->sin_port);
+    const bool ephemeral = port == 0;
+    if (ephemeral && getsockname(socket, reinterpret_cast<sockaddr*>(&bound), &bound_length) == 0)
+        port = ntohs(bound.sin_port);
+    if (known)
+        shim_log("[net] bind socket=%llu 0.0.0.0:%u %s%s -- not this title's RendezVous port (%u); if RendezVous "
+                 "traffic leaves from this socket, set prudp_port=%u in hook.config",
+                 static_cast<unsigned long long>(socket), static_cast<unsigned>(port),
+                 type == SOCK_DGRAM ? "udp" : "tcp", ephemeral ? " (ephemeral)" : "", static_cast<unsigned>(known),
+                 static_cast<unsigned>(port));
+    else
+        shim_log("[net] bind socket=%llu 0.0.0.0:%u %s%s -- no prudp_port known for this title; if RendezVous "
+                 "traffic leaves from this socket, set prudp_port=%u in hook.config",
+                 static_cast<unsigned long long>(socket), static_cast<unsigned>(port),
+                 type == SOCK_DGRAM ? "udp" : "tcp", ephemeral ? " (ephemeral)" : "", static_cast<unsigned>(port));
+}
+
+int WSAAPI hooked_bind(SOCKET socket, const sockaddr* address, int length) {
+    if (!g_bind) return SOCKET_ERROR;
+    const bool prudp = is_prudp_listener_bind(address, length);
+
+    int result;
+    if (prudp && hook_config().bind_ip_be) {
+        sockaddr_in replacement = *reinterpret_cast<const sockaddr_in*>(address);
+        replacement.sin_addr.s_addr = hook_config().bind_ip_be;
+        char before[64] = "?", after[64] = "?";
+        format_address(address, length, before, sizeof(before));
+        format_address(reinterpret_cast<const sockaddr*>(&replacement), sizeof(replacement), after, sizeof(after));
+        shim_log("[net] bind socket=%llu %s -> %s", static_cast<unsigned long long>(socket), before, after);
+        result = g_bind(socket, reinterpret_cast<const sockaddr*>(&replacement), sizeof(replacement));
+    } else {
+        result = g_bind(socket, address, length);
+    }
+
+    if (result == 0 && prudp) {
+        if (hook_config().log_rdv_full)
+            shim_log("[net] bind socket=%llu 0.0.0.0:%u udp -- this title's RendezVous socket",
+                     static_cast<unsigned long long>(socket), static_cast<unsigned>(prudp_listener_port()));
+        playforward::prove_launch(socket);
+    }
+    if (result == 0 && !prudp) log_unclassified_bind(socket, address, length);
+    return result;
+}
+
 int WSAAPI hooked_connect(SOCKET socket, const sockaddr* address, int length) {
     if (hook_config().capture_tcp && is_redirect_address(address, length)) track_socket(socket);
     if (hook_config().capture_tcp || hook_config().log_tcp_full) log_packet("connect", address, length, nullptr, 0, false);
+    tls_observer::on_connect(socket);
     return g_connect(socket, address, length);
 }
 
@@ -202,10 +296,22 @@ int WSAAPI hooked_recv(SOCKET socket, char* data, int length, int flags) {
     const int result = g_recv(socket, data, length, flags);
     if (result > 0 && (hook_config().log_tcp_full || (hook_config().capture_tcp && is_tracked(socket))))
         shim_log_bytes("[tcp] recv", data, result);
+    if (result > 0 && !(flags & MSG_PEEK)) {
+        const WSABUF received{static_cast<ULONG>(result), data};
+        if (!tls_observer::on_received(socket, &received, 1, static_cast<DWORD>(result))) return refuse_read();
+    }
     return result;
 }
 
-int WSAAPI hooked_closesocket(SOCKET socket) { untrack_socket(socket); return g_closesocket(socket); }
+int WSAAPI hooked_closesocket(SOCKET socket) {
+    untrack_socket(socket);
+    tls_observer::on_close(socket);
+    AcquireSRWLockExclusive(&g_pending_tls_reads_lock);
+    for (auto it = g_pending_tls_reads.begin(); it != g_pending_tls_reads.end();)
+        it = it->second.socket == socket ? g_pending_tls_reads.erase(it) : std::next(it);
+    ReleaseSRWLockExclusive(&g_pending_tls_reads_lock);
+    return g_closesocket(socket);
+}
 
 int WSAAPI hooked_sendto(SOCKET socket, const char* data, int length, int flags, const sockaddr* to, int to_length) {
     if (hook_config().log_rdv_full || hook_config().capture_tcp)
@@ -232,9 +338,17 @@ int WSAAPI hooked_wsarecvfrom(SOCKET socket, LPWSABUF buffers, DWORD count, LPDW
                               sockaddr* from, LPINT from_length, LPWSAOVERLAPPED overlap,
                               LPWSAOVERLAPPED_COMPLETION_ROUTINE completion) {
     const int status = g_wsarecvfrom(socket, buffers, count, received, flags, from, from_length, overlap, completion);
-    if (status == 0 && received && *received && buffers && count && (hook_config().log_rdv_full || hook_config().capture_tcp))
+    const bool logging = hook_config().log_rdv_full || hook_config().capture_tcp;
+    if (status == 0 && received && *received && buffers && count && logging) {
         log_packet("udp WSARecvFrom", from, from_length ? *from_length : 0, buffers[0].buf,
                    static_cast<int>(*received), hook_config().log_rdv_full);
+    } else if (status == SOCKET_ERROR && overlap && buffers && count && logging &&
+               WSAGetLastError() == WSA_IO_PENDING) {
+        AcquireSRWLockExclusive(&g_pending_recvs_lock);
+        if (g_pending_recvs.size() > 512) g_pending_recvs.clear();
+        g_pending_recvs[overlap] = PendingRecv{buffers[0].buf, from, from_length};
+        ReleaseSRWLockExclusive(&g_pending_recvs_lock);
+    }
     return status;
 }
 
@@ -247,19 +361,89 @@ int WSAAPI hooked_wsasend(SOCKET socket, LPWSABUF buffers, DWORD count, LPDWORD 
 int WSAAPI hooked_wsarecv(SOCKET socket, LPWSABUF buffers, DWORD count, LPDWORD received, LPDWORD flags,
                           LPWSAOVERLAPPED overlap, LPWSAOVERLAPPED_COMPLETION_ROUTINE completion) {
     const int status = g_wsarecv(socket, buffers, count, received, flags, overlap, completion);
+    const int error = status == SOCKET_ERROR ? WSAGetLastError() : 0;
     if (status == 0 && received && *received && buffers && count && hook_config().log_tcp_full)
         shim_log_bytes("[tcp] WSARecv", buffers[0].buf, *received);
+    const bool peek = flags && (*flags & MSG_PEEK);
+    if (status == 0 && received && *received && buffers && count && !peek &&
+        !tls_observer::on_received(socket, buffers, count, *received)) {
+        *received = 0;
+        return refuse_read();
+    }
+    if (status == SOCKET_ERROR && error == WSA_IO_PENDING && overlap && buffers && count && !peek &&
+        tls_observer::watching(socket)) {
+        const bool followable = count <= kMaxWatchedReadBuffers && !completion;
+        tls_observer::on_read_posted(socket, !followable);
+        if (followable) {
+            PendingTlsRead pending{socket, {}, count};
+            for (DWORD i = 0; i < count; ++i) pending.buffers[i] = buffers[i];
+            AcquireSRWLockExclusive(&g_pending_tls_reads_lock);
+            g_pending_tls_reads[overlap] = pending;
+            ReleaseSRWLockExclusive(&g_pending_tls_reads_lock);
+        }
+    }
+    if (status == SOCKET_ERROR && overlap && buffers && count &&
+        (hook_config().log_rdv_full || hook_config().capture_tcp) &&
+        WSAGetLastError() == WSA_IO_PENDING) {
+        AcquireSRWLockExclusive(&g_pending_recvs_lock);
+        g_pending_recvs[overlap] = PendingRecv{buffers[0].buf, nullptr, nullptr};
+        ReleaseSRWLockExclusive(&g_pending_recvs_lock);
+    }
+    if (status == SOCKET_ERROR) WSASetLastError(error);
     return status;
 }
 
+bool observe_completed_read(LPWSAOVERLAPPED overlap, BOOL completed, DWORD transferred) {
+    AcquireSRWLockExclusive(&g_pending_tls_reads_lock);
+    auto it = g_pending_tls_reads.find(overlap);
+    if (it == g_pending_tls_reads.end()) { ReleaseSRWLockExclusive(&g_pending_tls_reads_lock); return true; }
+    const int error = completed ? 0 : WSAGetLastError();
+    if (!completed && error == WSA_IO_INCOMPLETE) { ReleaseSRWLockExclusive(&g_pending_tls_reads_lock); return true; }
+    const PendingTlsRead pending = it->second;
+    g_pending_tls_reads.erase(it);
+    ReleaseSRWLockExclusive(&g_pending_tls_reads_lock);
+
+    if (!completed || !transferred) {
+        tls_observer::on_read_finished(pending.socket);
+        if (!completed) WSASetLastError(error);
+        return true;
+    }
+    return tls_observer::on_received(pending.socket, pending.buffers, pending.count, transferred);
+}
+
 BOOL WSAAPI hooked_wsaoverlapped(SOCKET socket, LPWSAOVERLAPPED overlap, LPDWORD transferred, BOOL wait, LPDWORD flags) {
-    return g_wsaoverlapped(socket, overlap, transferred, wait, flags);
+    const BOOL result = g_wsaoverlapped(socket, overlap, transferred, wait, flags);
+    if (overlap && !observe_completed_read(overlap, result, transferred ? *transferred : 0)) {
+        if (transferred) *transferred = 0;
+        WSASetLastError(WSAECONNABORTED);
+        return FALSE;
+    }
+    if (result && transferred && *transferred && overlap &&
+        (hook_config().log_rdv_full || hook_config().capture_tcp)) {
+        PendingRecv pending{};
+        bool found = false;
+        AcquireSRWLockExclusive(&g_pending_recvs_lock);
+        auto it = g_pending_recvs.find(overlap);
+        if (it != g_pending_recvs.end()) {
+            pending = it->second;
+            g_pending_recvs.erase(it);
+            found = true;
+        }
+        ReleaseSRWLockExclusive(&g_pending_recvs_lock);
+        if (found && pending.buffer) {
+            log_packet("udp WSARecvFrom (async)", pending.from,
+                       pending.from_length ? *pending.from_length : 0, pending.buffer,
+                       static_cast<int>(*transferred), hook_config().log_rdv_full);
+        }
+    }
+    return result;
 }
 
 BOOL PASCAL hooked_connectex(SOCKET socket, const sockaddr* name, int name_length, PVOID send_buffer,
                              DWORD send_length, LPDWORD sent, LPOVERLAPPED overlap) {
     if (is_redirect_address(name, name_length)) track_socket(socket);
     if (hook_config().log_tcp_full) log_packet("ConnectEx", name, name_length, send_buffer, send_length, true);
+    tls_observer::on_connect(socket);
     return g_connectex(socket, name, name_length, send_buffer, send_length, sent, overlap);
 }
 
@@ -303,6 +487,7 @@ Binding kBindings[] = {
     {NetworkApi::GetHostByName, "gethostbyname", reinterpret_cast<void*>(hooked_gethostbyname), reinterpret_cast<void**>(&g_gethostbyname)},
     {NetworkApi::Socket, "socket", reinterpret_cast<void*>(hooked_socket), reinterpret_cast<void**>(&g_socket)},
     {NetworkApi::WSASocketW, "WSASocketW", reinterpret_cast<void*>(hooked_wsasocketw), reinterpret_cast<void**>(&g_wsasocketw)},
+    {NetworkApi::Bind, "bind", reinterpret_cast<void*>(hooked_bind), reinterpret_cast<void**>(&g_bind)},
     {NetworkApi::Connect, "connect", reinterpret_cast<void*>(hooked_connect), reinterpret_cast<void**>(&g_connect)},
     {NetworkApi::Send, "send", reinterpret_cast<void*>(hooked_send), reinterpret_cast<void**>(&g_send)},
     {NetworkApi::Recv, "recv", reinterpret_cast<void*>(hooked_recv), reinterpret_cast<void**>(&g_recv)},
@@ -420,17 +605,19 @@ void install_export_hooks() {
 
 void install_iat_hooks(HMODULE game_module) {
     if (!has_resolver(ResolverIat)) return;
-    int installed = 0;
+    int installed = 0, already = 0;
     for (Binding& binding : kBindings) {
         const NetworkBindingDefinition* definition = binding_definition(binding.api);
-        if (!definition || !(definition->resolver_methods & ResolverIat) || *binding.original) continue;
+        if (!definition || !(definition->resolver_methods & ResolverIat)) continue;
+        if (*binding.original) { ++already; continue; }
         void* original = definition->name
             ? patch_iat(game_module, "WS2_32.dll", definition->name, binding.hook) : nullptr;
         if (!original && definition->ordinal)
             original = patch_iat_ordinal(game_module, "WS2_32.dll", definition->ordinal, binding.hook);
         if (original) { *binding.original = original; ++installed; }
     }
-    shim_log("[hook] installed %d common Winsock IAT hook%s", installed, installed == 1 ? "" : "s");
+    if (!installed && already) shim_log("[hook] common Winsock IAT hooks already installed");
+    else shim_log("[hook] installed %d common Winsock IAT hook%s", installed, installed == 1 ? "" : "s");
 }
 }
 

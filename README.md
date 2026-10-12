@@ -13,6 +13,17 @@ src/games/<game>/*.def        exact proxy export table for that title
 
 See [the LAN setup guide](docs/LAN_SETUP.md) for installation, server ports, TLS RVAs, game-specific configuration, and launch troubleshooting.
 
+## Tests
+
+```sh
+tests/run_host_tests.sh   # the launch proof's hash, MAC and datagram layout, with the host compiler
+tests/run_wine_test.sh    # the Windows half under Wine, against the real game server dispatch
+```
+
+The launch proof (`src/core/playforward/`) is the one piece of this shim that
+must agree byte for byte with another implementation -- the game server's --
+so it is kept portable and tested here, not only inside a game.
+
 ## Building
 
 Use a separate MinGW build tree for each architecture:
@@ -22,11 +33,13 @@ cmake -S . -B build/x64 -DCMAKE_TOOLCHAIN_FILE=/path/to/mingw64.cmake
 cmake --build build/x64 --target farcry4_shim farcry5_shim farcrynewdawn_shim
 
 cmake -S . -B build/x86 -DCMAKE_TOOLCHAIN_FILE=/path/to/mingw32.cmake
-cmake --build build/x86 --target farcry3_shim
+cmake --build build/x86 --target farcry3_shim splintercellblacklist_shim ghostreconfuturesoldier_shim
 ```
 
-Each artifact is placed in its own target directory to avoid the intentional `bink2w64.dll` filename collision between FC4, FC5, and New Dawn. Each game keeps its own Bink export definition under its adapter because the export tables differ even where the proxy filename is shared.
+Each artifact is placed in its own target directory to avoid the intentional filename collisions: `bink2w64.dll` between FC4, FC5, and New Dawn, and `binkw32.dll` between FC3 and Future Soldier. Each game keeps its own Bink export definition under its adapter because the export tables differ even where the proxy filename is shared.
 
 ## Adding another Ubisoft game
 
 Add an adapter and a version definition describing the proxy DLL, main module, backend host rules, resolver methods, exact name/ordinal bindings, and verified TLS hook. The adapter locates hooks; it must not reimplement redirect or capture policy. Add a separate build target only when the proxy/export table differs.
+
+For a title that logs in through Playforward, the version definition also carries the local UDP port the game binds its RendezVous socket to (the launch proof runs on that bind), the server's authentication port for the title (where the proof goes), and the title id Playforward knows it by; and the adapter hooks whatever the game reads its identity from -- a command-line option, a Uplay export, an Orbit callback -- to answer with `hook.config`'s `login_name`. `src/games/blacklist/identity.cpp` and `src/games/futuresoldier/identity.cpp` are the two shapes of that so far.
