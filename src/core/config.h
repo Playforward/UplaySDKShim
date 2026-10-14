@@ -39,9 +39,11 @@ struct HookConfig {
     bool nla_report_online = true;
     bool menu_autopress = false;
     bool online_autologin = true;
+    bool build_fixes = true;
     char trace_points[512] = {};
     char login_name[64] = {};
     bool playforward_launch = true;
+    bool playforward_presence = true;
     uint16_t launch_port = 0;
     uint16_t prudp_port = 0;
     char launch_pipe[64] = "playforward-game-bridge";

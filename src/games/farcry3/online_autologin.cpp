@@ -2,6 +2,7 @@
 
 #include "core/config.h"
 #include "core/logging.h"
+#include "games/farcry3/code_scan.h"
 #include "games/farcry3/versions/current.h"
 
 #include <cstdint>
@@ -32,61 +33,6 @@ bool g_done = false;
 int g_attempts = 0;
 long g_updates_until_retry = 0;
 int g_last_state = -1;
-
-struct Pattern {
-    uint8_t bytes[64];
-    bool wild[64];
-    size_t length = 0;
-};
-
-Pattern parse(const char* text) {
-    Pattern p;
-    while (*text && p.length < sizeof(p.bytes)) {
-        if (*text == ' ') { ++text; continue; }
-        if (text[0] == '?') {
-            p.wild[p.length] = true;
-            p.bytes[p.length++] = 0;
-        } else {
-            char hex[3] = {text[0], text[1], 0};
-            p.wild[p.length] = false;
-            p.bytes[p.length++] = (uint8_t)strtoul(hex, nullptr, 16);
-        }
-        text += 2;
-    }
-    return p;
-}
-
-bool matches(const uint8_t* at, const Pattern& p) {
-    for (size_t i = 0; i < p.length; ++i)
-        if (!p.wild[i] && at[i] != p.bytes[i]) return false;
-    return true;
-}
-
-size_t find_all(HMODULE module, const Pattern& p, const uint8_t** out, size_t capacity) {
-    auto* base = reinterpret_cast<const uint8_t*>(module);
-    auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
-    auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
-    const IMAGE_SECTION_HEADER* section = IMAGE_FIRST_SECTION(nt);
-    size_t found = 0;
-    for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++section) {
-        if (!(section->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
-        const uint8_t* start = base + section->VirtualAddress;
-        const size_t size = section->Misc.VirtualSize;
-        if (size < p.length) continue;
-        for (size_t at = 0; at + p.length <= size; ++at) {
-            if (start[at] != p.bytes[0] || !matches(start + at, p)) continue;
-            if (found < capacity) out[found] = start + at;
-            ++found;
-        }
-    }
-    return found;
-}
-
-const uint8_t* call_target(const uint8_t* call) {
-    int32_t rel;
-    memcpy(&rel, call + 1, sizeof(rel));
-    return call + 5 + rel;
-}
 
 int first_slot_field(uintptr_t manager, uintptr_t field) {
     const uint8_t* count = reinterpret_cast<const uint8_t*>(manager + kSlotCount);
@@ -178,9 +124,9 @@ void install_online_autologin() {
     }
 
     const uint8_t* walls[4] = {};
-    const size_t wall_count = find_all(engine, parse(kWallHandler), walls, 4);
+    const size_t wall_count = find_all(engine, parse_pattern(kWallHandler), walls, 4);
     const uint8_t* updates[2] = {};
-    const size_t update_count = find_all(engine, parse(kSessionUpdate), updates, 2);
+    const size_t update_count = find_all(engine, parse_pattern(kSessionUpdate), updates, 2);
     if (wall_count == 0 || update_count != 1) {
         shim_log("[autologin] %s is not the 2022 build this knows (wall handlers=%u, session updates=%u); not installed",
                  engine_name, (unsigned)wall_count, (unsigned)update_count);

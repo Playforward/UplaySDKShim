@@ -4,6 +4,7 @@
 #include "core/game_adapter.h"
 #include "core/logging.h"
 #include "core/playforward/launch_envelope.h"
+#include "core/playforward/launch_session.h"
 
 #include <ws2tcpip.h>
 #include <cstdio>
@@ -15,166 +16,6 @@ namespace {
 constexpr DWORD kReplyTimeoutMs = 1000;
 
 constexpr int kAttempts = 3;
-
-constexpr size_t kReplyCapacity = 256;
-
-constexpr DWORD kPipeBusyWaitMs = 3000;
-
-constexpr DWORD kBridgeConnectTimeoutMs = 1000;
-constexpr DWORD kBridgeReplyTimeoutMs = 5000;
-
-envelope::Launch g_launch;
-bool g_have_launch = false;
-SRWLOCK g_launch_lock = SRWLOCK_INIT;
-
-int build_request(char* out, size_t capacity) {
-    const GameAdapter& game = game_adapter();
-    return snprintf(out, capacity, "launch %s\n", game.playforward_title ? game.playforward_title : game.id);
-}
-
-bool parse_reply(const char* reply, size_t length, envelope::Launch& launch) {
-    if (envelope::parse_bridge_reply(reply, launch)) return true;
-    if (strncmp(reply, "ERROR ", 6) == 0) shim_log("[playforward] the desktop client refused a launch: %s", reply + 6);
-    else shim_log("[playforward] the bridge answered %u bytes that are not a launch", static_cast<unsigned>(length));
-    return false;
-}
-
-bool ask_pipe(envelope::Launch& launch, bool& found) {
-    found = false;
-    char path[MAX_PATH];
-    snprintf(path, sizeof(path), "\\\\.\\pipe\\%s", hook_config().launch_pipe);
-
-    HANDLE pipe = INVALID_HANDLE_VALUE;
-    for (;;) {
-        pipe = CreateFileA(path, GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
-        if (pipe != INVALID_HANDLE_VALUE) break;
-        const DWORD error = GetLastError();
-        if (error == ERROR_PIPE_BUSY && WaitNamedPipeA(path, kPipeBusyWaitMs)) continue;
-        if (error != ERROR_FILE_NOT_FOUND)
-            shim_log("[playforward] could not open the desktop client bridge at %s (error %lu)", path, error);
-        return false;
-    }
-    found = true;
-
-    char request[128];
-    const int request_length = build_request(request, sizeof(request));
-    DWORD written = 0;
-    if (!WriteFile(pipe, request, DWORD(request_length), &written, nullptr) || written != DWORD(request_length)) {
-        shim_log("[playforward] could not write to the bridge (error %lu)", GetLastError());
-        CloseHandle(pipe);
-        return false;
-    }
-
-    char reply[kReplyCapacity];
-    size_t length = 0;
-    for (;;) {
-        DWORD read = 0;
-        if (!ReadFile(pipe, reply + length, 1, &read, nullptr) || read != 1) break;
-        if (reply[length] == '\n') break;
-        if (++length == sizeof(reply) - 1) break;
-    }
-    reply[length] = 0;
-    if (length && reply[length - 1] == '\r') reply[--length] = 0;
-    CloseHandle(pipe);
-
-    return parse_reply(reply, length, launch);
-}
-
-SOCKET connect_local(uint16_t port) {
-    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (s == INVALID_SOCKET) return INVALID_SOCKET;
-
-    sockaddr_in address{};
-    address.sin_family = AF_INET;
-    address.sin_port = htons(port);
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-
-    u_long non_blocking = 1;
-    ioctlsocket(s, FIONBIO, &non_blocking);
-    if (connect(s, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) == SOCKET_ERROR) {
-        if (WSAGetLastError() != WSAEWOULDBLOCK) {
-            closesocket(s);
-            return INVALID_SOCKET;
-        }
-        fd_set writable, failed;
-        FD_ZERO(&writable); FD_SET(s, &writable);
-        FD_ZERO(&failed); FD_SET(s, &failed);
-        timeval timeout{static_cast<long>(kBridgeConnectTimeoutMs / 1000),
-                        static_cast<long>((kBridgeConnectTimeoutMs % 1000) * 1000)};
-        if (select(0, nullptr, &writable, &failed, &timeout) <= 0 || !FD_ISSET(s, &writable)) {
-            closesocket(s);
-            return INVALID_SOCKET;
-        }
-    }
-
-    non_blocking = 0;
-    ioctlsocket(s, FIONBIO, &non_blocking);
-    DWORD reply_timeout = kBridgeReplyTimeoutMs;
-    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&reply_timeout), sizeof(reply_timeout));
-    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&reply_timeout), sizeof(reply_timeout));
-    return s;
-}
-
-bool ask_socket(envelope::Launch& launch) {
-    const uint16_t port = hook_config().bridge_port;
-    if (!port) return false;
-
-    SOCKET bridge = connect_local(port);
-    if (bridge == INVALID_SOCKET) {
-        shim_log("[playforward] no desktop client bridge on 127.0.0.1:%u either; logging in by the client's "
-                 "address binding, if any", static_cast<unsigned>(port));
-        return false;
-    }
-
-    char request[128];
-    const int request_length = build_request(request, sizeof(request));
-    if (send(bridge, request, request_length, 0) != request_length) {
-        shim_log("[playforward] could not write to the bridge on 127.0.0.1:%u (error %d)",
-                 static_cast<unsigned>(port), WSAGetLastError());
-        closesocket(bridge);
-        return false;
-    }
-
-    char reply[kReplyCapacity];
-    size_t length = 0;
-    for (;;) {
-        const int read = recv(bridge, reply + length, 1, 0);
-        if (read != 1) break;
-        if (reply[length] == '\n') break;
-        if (++length == sizeof(reply) - 1) break;
-    }
-    reply[length] = 0;
-    if (length && reply[length - 1] == '\r') reply[--length] = 0;
-    closesocket(bridge);
-
-    if (length == 0) {
-        shim_log("[playforward] the bridge on 127.0.0.1:%u closed without answering", static_cast<unsigned>(port));
-        return false;
-    }
-    shim_log("[playforward] asked the desktop client on 127.0.0.1:%u", static_cast<unsigned>(port));
-    return parse_reply(reply, length, launch);
-}
-
-bool ask_bridge(envelope::Launch& launch) {
-    bool pipe_found = false;
-    if (ask_pipe(launch, pipe_found)) return true;
-    if (pipe_found) return false;
-    return ask_socket(launch);
-}
-
-bool current_launch(envelope::Launch& launch) {
-    AcquireSRWLockExclusive(&g_launch_lock);
-    if (!g_have_launch && ask_bridge(g_launch)) {
-        g_have_launch = true;
-        char id[envelope::kLaunchIdLength * 2 + 1];
-        envelope::format_id(g_launch, id);
-        shim_log("[playforward] the desktop client issued launch %s", id);
-    }
-    const bool have = g_have_launch;
-    if (have) launch = g_launch;
-    ReleaseSRWLockExclusive(&g_launch_lock);
-    return have;
-}
 
 int receive_from_server(SOCKET socket, const sockaddr_in& server, uint8_t* buffer, size_t capacity) {
     for (;;) {
@@ -220,7 +61,10 @@ void prove_launch(SOCKET socket) {
     }
 
     envelope::Launch launch;
-    if (!current_launch(launch)) return;
+    if (!session::acquire(launch)) return;
+    char id[envelope::kLaunchIdLength * 2 + 1];
+    envelope::format_id(launch, id);
+    shim_log("[playforward] acquired launch %s", id);
 
     sockaddr_in server{};
     server.sin_family = AF_INET;
@@ -235,6 +79,7 @@ void prove_launch(SOCKET socket) {
         envelope::hello(launch, outgoing);
         if (!send_to_server(socket, server, outgoing, envelope::kHelloLength)) {
             shim_log("[playforward] could not send HELLO to %s:%u (error %d)", config.redirect_ip, port, WSAGetLastError());
+            session::unproved(socket, server, launch);
             return;
         }
 
@@ -244,6 +89,7 @@ void prove_launch(SOCKET socket) {
                 shim_log("[playforward] nothing is listening at %s:%u; the game's own login will not reach it either", config.redirect_ip, port);
             else
                 shim_log("[playforward] socket error waiting for CHALLENGE (%d)", WSAGetLastError());
+            session::unproved(socket, server, launch);
             return;
         }
         if (length == 0) continue;
@@ -255,20 +101,24 @@ void prove_launch(SOCKET socket) {
         envelope::proof(launch, challenge, outgoing);
         if (!send_to_server(socket, server, outgoing, envelope::kProofLength)) {
             shim_log("[playforward] could not send PROOF (error %d)", WSAGetLastError());
+            session::unproved(socket, server, launch);
             return;
         }
 
         length = receive_from_server(socket, server, buffer, sizeof(buffer));
-        if (length < 0) { shim_log("[playforward] socket error waiting for BOUND (%d)", WSAGetLastError()); return; }
+        if (length < 0) {
+            shim_log("[playforward] socket error waiting for BOUND (%d)", WSAGetLastError());
+            session::unproved(socket, server, launch);
+            return;
+        }
         if (length == 0) {
-            shim_log("[playforward] the server did not answer the PROOF (attempt %d); dropping this launch", attempt);
-            AcquireSRWLockExclusive(&g_launch_lock);
-            g_have_launch = false;
-            ReleaseSRWLockExclusive(&g_launch_lock);
+            shim_log("[playforward] the server did not answer the PROOF (attempt %d)", attempt);
+            session::unproved(socket, server, launch);
             return;
         }
         if (!envelope::read_bound(buffer, static_cast<size_t>(length), launch, challenge)) {
             shim_log("[playforward] the server's BOUND reply (%d bytes) is not for this launch and challenge, or its MAC is wrong", length);
+            session::report("failed", "unproved");
             return;
         }
 
@@ -277,11 +127,13 @@ void prove_launch(SOCKET socket) {
         getsockname(socket, reinterpret_cast<sockaddr*>(&local), &local_length);
         shim_log("[playforward] launch proved from local port %u to %s:%u; this socket's login is this player",
                  ntohs(local.sin_port), config.redirect_ip, port);
+        session::bound(socket, server, launch);
         return;
     }
 
     shim_log("[playforward] no CHALLENGE after %d HELLOs to %s:%u; is Playforward login enabled on that server?",
              kAttempts, config.redirect_ip, port);
+    session::unproved(socket, server, launch);
 }
 
 }

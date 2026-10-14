@@ -4,6 +4,7 @@
 #include "core/game_adapter.h"
 #include "core/logging.h"
 #include "games/common/uplay_debug.h"
+#include "games/farcry3/build_fixes.h"
 #include "games/farcry3/input_inject.h"
 #include "games/farcry3/launch.h"
 #include "games/farcry3/online_autologin.h"
@@ -31,6 +32,7 @@ void install_fc3_debug_hooks(HMODULE module) {
 }
 
 void install_entry_hooks(HMODULE process_module) {
+    farcry3::install_build_fixes();
     farcry3::install_launch_hooks(process_module);
     farcry3::install_online_autologin();
     farcry3::install_input_hooks();

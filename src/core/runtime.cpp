@@ -3,6 +3,7 @@
 #include "core/logging.h"
 #include "core/networking/redirect.h"
 #include "core/networking/tls.h"
+#include "core/playforward/play_presence.h"
 
 namespace {
 HMODULE g_real_proxy = nullptr;
@@ -39,6 +40,7 @@ DWORD WINAPI initialize(LPVOID) {
     install_network_hooks(main_module);
     install_tls_bypass(main_module, game.tls);
     if (game.install_debug_hooks) game.install_debug_hooks(main_module);
+    playforward::start_play_presence();
     return 0;
 }
 }

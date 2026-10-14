@@ -13,17 +13,6 @@ src/games/<game>/*.def        exact proxy export table for that title
 
 See [the LAN setup guide](docs/LAN_SETUP.md) for installation, server ports, TLS RVAs, game-specific configuration, and launch troubleshooting.
 
-## Tests
-
-```sh
-tests/run_host_tests.sh   # the launch proof's hash, MAC and datagram layout, with the host compiler
-tests/run_wine_test.sh    # the Windows half under Wine, against the real game server dispatch
-```
-
-The launch proof (`src/core/playforward/`) is the one piece of this shim that
-must agree byte for byte with another implementation -- the game server's --
-so it is kept portable and tested here, not only inside a game.
-
 ## Building
 
 Use a separate MinGW build tree for each architecture:

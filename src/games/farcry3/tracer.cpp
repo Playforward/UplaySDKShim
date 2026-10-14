@@ -1,4 +1,5 @@
 #include "games/farcry3/tracer.h"
+#include "games/farcry3/build_fixes.h"
 #include "core/config.h"
 #include "core/debug/field_sampler.h"
 #include "core/debug/watchpoint.h"
@@ -867,6 +868,12 @@ void install_trace_points() {
         uintptr_t address = (uintptr_t)mod + rva;
         if (IsBadReadPtr((void*)address, 1)) {
             shim_log("[trace] %s+0x%llx is unreadable — skipping", module_name, (unsigned long long)rva);
+            continue;
+        }
+
+        if (const char* fix = farcry3::build_fix_at(address)) {
+            shim_log("[trace] '%s' at %s+0x%llx skipped: the shim's built-in %s fix already patches it",
+                     label ? label : rva_str, module_name, (unsigned long long)rva, fix);
             continue;
         }
 

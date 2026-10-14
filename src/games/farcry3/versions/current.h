@@ -29,5 +29,5 @@ inline constexpr NetworkBindingDefinition kNetwork[] = {
 inline constexpr TlsHookDefinition kTls{0, TlsHookMethod::Int3ReturnTrue, 0, 0};
 inline constexpr uint16_t kPrudpListenerPort = 3074;
 inline constexpr uint16_t kLaunchPort = 6570;
-inline constexpr const char* kPlayforwardTitle = "farcry3";
+inline constexpr const char* kPlayforwardTitle = "far-cry-3";
 }

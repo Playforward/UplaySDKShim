@@ -52,7 +52,9 @@ void assign_bool(const char* key, const char* value, HookConfig& c, bool& known)
     CONFIG_BOOL(nla_report_online)
     CONFIG_BOOL(menu_autopress)
     CONFIG_BOOL(online_autologin)
+    CONFIG_BOOL(build_fixes)
     CONFIG_BOOL(playforward_launch)
+    CONFIG_BOOL(playforward_presence)
 #undef CONFIG_BOOL
 }
 }
@@ -154,12 +156,12 @@ HookConfig load_hook_config() {
 void log_hook_config(const HookConfig& c) {
     const GameAdapter& game = game_adapter();
     shim_log("[config] redirect_ip=%s bind_ip=%s redirect_all_dns=%d bypass_tls_verify=%d rva_tls_verify=0x%llx tls_pins=%u login_name=%s "
-             "playforward_launch=%d launch_port=%u prudp_port=%u launch_pipe=%s bridge_port=%u",
+             "playforward_launch=%d playforward_presence=%d launch_port=%u prudp_port=%u launch_pipe=%s bridge_port=%u",
              c.redirect_ip[0] ? c.redirect_ip : "-", c.bind_ip[0] ? c.bind_ip : "-", static_cast<int>(c.redirect_all_dns),
              static_cast<int>(c.bypass_tls_verify), static_cast<unsigned long long>(c.rva_tls_verify),
              static_cast<unsigned>(c.tls_pin_count),
              c.login_name[0] ? c.login_name : "-",
-             static_cast<int>(c.playforward_launch),
+             static_cast<int>(c.playforward_launch), static_cast<int>(c.playforward_presence),
              static_cast<unsigned>(c.launch_port ? c.launch_port : game.launch_port),
              static_cast<unsigned>(c.prudp_port ? c.prudp_port : game.prudp_listener_port), c.launch_pipe,
              static_cast<unsigned>(c.bridge_port));
