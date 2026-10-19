@@ -47,6 +47,7 @@ void assign_bool(const char* key, const char* value, HookConfig& c, bool& known)
     CONFIG_BOOL(dump_ssl_jumptable)
     CONFIG_BOOL(trace_invite_dostart)
     CONFIG_BOOL(trace_game_log)
+    CONFIG_BOOL(trace_debug_strings)
     CONFIG_BOOL(trace_winhttp)
     CONFIG_BOOL(trace_net_states)
     CONFIG_BOOL(nla_report_online)
@@ -135,6 +136,10 @@ HookConfig load_hook_config() {
             const unsigned long port = strtoul(value, nullptr, 0);
             if (port > 65535) shim_log("[config] bridge_port '%s' is not a port", value);
             else config.bridge_port = static_cast<uint16_t>(port);
+        } else if (_stricmp(key, "redirect_http_port") == 0) {
+            const unsigned long port = strtoul(value, nullptr, 0);
+            if (port > 65535) shim_log("[config] redirect_http_port '%s' is not a port", value);
+            else config.redirect_http_port = static_cast<uint16_t>(port);
         } else if (_stricmp(key, "launch_pipe") == 0) {
             if (!value[0] || strlen(value) >= sizeof(config.launch_pipe))
                 shim_log("[config] launch_pipe must be 1 to %u characters and was ignored",

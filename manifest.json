@@ -85,6 +85,20 @@
         "Future Soldier DX9.exe"
       ],
       "tlsVerifierRva": null
+    },
+    "assassinscreedbrotherhood": {
+      "name": "Assassin's Creed Brotherhood",
+      "architecture": "x86",
+      "buildTarget": "assassinscreedbrotherhood_shim",
+      "artifact": "assassinscreedbrotherhood_shim/binkw32.dll",
+      "proxy": "binkw32.dll",
+      "original": "binkw32_real.dll",
+      "profile": "acb-pc-2011",
+      "modules": [
+        "ACBMP.exe",
+        "ACBSP.exe"
+      ],
+      "tlsVerifierRva": null
     }
   }
 }

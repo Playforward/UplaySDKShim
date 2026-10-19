@@ -34,6 +34,7 @@ struct HookConfig {
     bool dump_ssl_jumptable = false;
     bool trace_invite_dostart = false;
     bool trace_game_log = false;
+    bool trace_debug_strings = false;
     bool trace_winhttp = false;
     bool trace_net_states = false;
     bool nla_report_online = true;
@@ -48,6 +49,7 @@ struct HookConfig {
     uint16_t prudp_port = 0;
     char launch_pipe[64] = "playforward-game-bridge";
     uint16_t bridge_port = 24771;
+    uint16_t redirect_http_port = 0;
 };
 
 const HookConfig& hook_config();

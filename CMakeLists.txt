@@ -54,6 +54,9 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
 
     add_game_shim(ghostreconfuturesoldier_shim "src/games/futuresoldier/adapter.cpp;src/games/futuresoldier/identity.cpp" src/games/futuresoldier/proxy_exports.def)
     set_target_properties(ghostreconfuturesoldier_shim PROPERTIES OUTPUT_NAME binkw32)
+
+    add_game_shim(assassinscreedbrotherhood_shim "src/games/brotherhood/adapter.cpp;src/games/brotherhood/identity.cpp" src/games/brotherhood/proxy_exports.def)
+    set_target_properties(assassinscreedbrotherhood_shim PROPERTIES OUTPUT_NAME binkw32)
 else()
     add_game_shim(farcry4_shim src/games/farcry4/adapter.cpp src/games/farcry4/proxy_exports.def)
     set_target_properties(farcry4_shim PROPERTIES OUTPUT_NAME bink2w64)

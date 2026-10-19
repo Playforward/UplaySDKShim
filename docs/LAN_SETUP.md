@@ -61,6 +61,7 @@ These values are relative to the listed module.
 | Far Cry New Dawn (`fcnd-fc_m64-67ef9b27`) | `FC_m64.dll` | Static Winsock IAT, including `gethostbyname` ordinal 52 | `0x03e07d00`; forced success and clears the verifier error field at object offset `0x17c`. |
 | Splinter Cell Blacklist (`scbl-pc-2425`) | `Blacklist_DX11_game.exe` or `Blacklist_game.exe` (the executable is the engine) | Static Winsock IAT: classic calls by ordinal, `WSA*` by name; bound from DllMain, ahead of the entry point | None needed: the OnlineConfig bootstrap is plain HTTP and RendezVous is PRUDP. |
 | Ghost Recon Future Soldier (`grfs-pc-2013`) | `Future Soldier DX11.exe` or `Future Soldier DX9.exe` | As Blacklist | None needed, as Blacklist. |
+| Assassin's Creed Brotherhood (`acb-pc-2011`) | `ACBMP.exe` (the 2011 multiplayer executable; the proxy also loads into `ACBSP.exe`, which launches it) | As Blacklist: classic calls by ordinal, `WSA*` and `getaddrinfo` by name. `*.ubi.com` and `*.ubisoft.com` are redirected too, because a missed lookup reaches Ubisoft's still-running ACB RendezVous hosts | None needed: plain-HTTP OnlineConfig, then PRUDP. |
 
 Blacklist and Future Soldier are pre-UbiServices titles like FC3: the only hostnames in either binary are the three `*onlineconfigservice.ubi.com` bootstrap hosts, and everything after that (the RendezVous sandbox, Storm/NAT, tracking) comes out of the OnlineConfig document the server serves — so the server's title entry decides where the game goes next. The `onlineConfigID` each sends is `967fad701a3648d8bf099f07207f4a73` for Blacklist (`3d33c627fd494564932ee0ad3cca365c` on its alternate-environment flag) and `23ad683803a0457cabce83f905811dbc` for Future Soldier; the server has to know these to answer `/OnlineConfigService.svc/GetOnlineConfig`.
 
@@ -73,6 +74,7 @@ Where each title reads its name from, and what the shim answers there with `logi
 | Far Cry 3 | `-login <name>` on the engine's command line (the 2022 build never builds its Uplay identity) | `src/games/farcry3/launch.cpp` |
 | Splinter Cell Blacklist | `UPLAY_USER_GetUsername` / `GetPassword` / `GetAccountId` out-buffer imports of `uplay_r1_loader.dll` | `src/games/blacklist/identity.cpp` |
 | Ghost Recon Future Soldier | `OrbitClient::GetLoginDetails` import of `ubiorbitapi_r2_loader.dll`, answered through the game's listener callback | `src/games/futuresoldier/identity.cpp` |
+| Assassin's Creed Brotherhood | `/onlineUser:<name> /onlinePassword:<pw>` on `ACBMP.exe`'s command line (put there by `ACBSP.exe`); the shim's `GetCommandLineA` says `login_name` instead and adds `/launchedfromotherexec`, so `ACBMP.exe` can be started on its own. A name with a space cannot be carried. | `src/games/brotherhood/identity.cpp` |
 
 The Uplay emulator (Blacklist) and the Orbit stub (Future Soldier) still have to be installed for everything else they provide -- friends and party init, savegames, the launcher check -- but their `upc.json` `Account.Name` and `orbit_stub.ini` `username` no longer decide who logs in and need not match anything. Without a `login_name` the shim leaves those imports alone and the DLLs' own values are used, as before.
 
@@ -168,6 +170,7 @@ Each line is one `key=value`, and a line may be at most 639 bytes. A longer line
 | `playforward_presence` | Default `1`. While the game runs, hold a `playing <title>` request open on the desktop client's bridge (same pipe, then port, as below), so friends see the player in this game; the client turns them back to online when the connection closes, which the operating system does however the game ends. With no client running the shim tries again every 5 s, logging only the first miss. Only titles Playforward knows (FC3, Blacklist, Future Soldier) report. Set `0` to keep the game from reporting itself. |
 | `launch_pipe` | Default `playforward-game-bridge`, the desktop client's bridge pipe name. Only for a client built to listen elsewhere. |
 | `bridge_port` | Default `24771`, the loopback port the desktop client's bridge answers on. The shim asks over the pipe first and falls back to `127.0.0.1:<bridge_port>`, which is the path every launch under Wine or Proton takes: there the client's pipe is in the host's namespace and the prefix's is its own, so the pipe is never found. The client writes the port it actually bound into this file, so this default only matters for a game launched before the client has ever provisioned it. |
+| `redirect_http_port` | Default `0` (off). A TCP connect to `redirect_ip:80` goes to this port instead -- for a server run unprivileged on a development machine, which cannot bind 80. |
 
 ### How the shim finds the desktop client
 

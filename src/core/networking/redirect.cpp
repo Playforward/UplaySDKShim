@@ -107,9 +107,14 @@ bool contains_ci(const char* value, const char* needle) {
     return false;
 }
 
+bool is_own_hostname(const char* host) {
+    char own[256] = {};
+    return gethostname(own, sizeof(own)) == 0 && own[0] && _stricmp(host, own) == 0;
+}
+
 bool should_redirect(const char* host) {
     if (!host || !hook_config().redirect_ip_be || !g_game) return false;
-    if (hook_config().redirect_all_dns) return true;
+    if (hook_config().redirect_all_dns) return !is_own_hostname(host);
     for (const char* const* entry = g_game->redirect_hosts; entry && *entry; ++entry) {
         if ((*entry)[0] == '*' ? contains_ci(host, *entry + 1) : _stricmp(host, *entry) == 0) return true;
     }
@@ -279,6 +284,16 @@ int WSAAPI hooked_bind(SOCKET socket, const sockaddr* address, int length) {
 }
 
 int WSAAPI hooked_connect(SOCKET socket, const sockaddr* address, int length) {
+    sockaddr_in remapped{};
+    const uint16_t http_port = hook_config().redirect_http_port;
+    if (http_port && is_redirect_address(address, length) &&
+        reinterpret_cast<const sockaddr_in*>(address)->sin_port == htons(80)) {
+        remapped = *reinterpret_cast<const sockaddr_in*>(address);
+        remapped.sin_port = htons(http_port);
+        address = reinterpret_cast<const sockaddr*>(&remapped);
+        length = sizeof(remapped);
+        shim_log("[net] connect to the server's port 80 sent to %u (redirect_http_port)", static_cast<unsigned>(http_port));
+    }
     if (hook_config().capture_tcp && is_redirect_address(address, length)) track_socket(socket);
     if (hook_config().capture_tcp || hook_config().log_tcp_full) log_packet("connect", address, length, nullptr, 0, false);
     tls_observer::on_connect(socket);
