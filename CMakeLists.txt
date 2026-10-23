@@ -57,12 +57,31 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
 
     add_game_shim(assassinscreedbrotherhood_shim "src/games/brotherhood/adapter.cpp;src/games/brotherhood/identity.cpp" src/games/brotherhood/proxy_exports.def)
     set_target_properties(assassinscreedbrotherhood_shim PROPERTIES OUTPUT_NAME binkw32)
+
+    add_game_shim(assassinscreedblackflag_shim "src/games/blackflag/adapter.cpp;src/games/blackflag/identity.cpp" src/games/blackflag/proxy_exports.def)
+    set_target_properties(assassinscreedblackflag_shim PROPERTIES OUTPUT_NAME bink2w32)
+
+    add_game_shim(assassinscreedrevelations_shim "src/games/revelations/adapter.cpp;src/games/revelations/identity.cpp" src/games/revelations/proxy_exports.def)
+    set_target_properties(assassinscreedrevelations_shim PROPERTIES OUTPUT_NAME binkw32)
+
+    # AC3MP.exe shares ACRMP.exe's binkw32 exports and Orbit login call.
+    add_game_shim(assassinscreed3_shim "src/games/ac3/adapter.cpp;src/games/revelations/identity.cpp" src/games/revelations/proxy_exports.def)
+    set_target_properties(assassinscreed3_shim PROPERTIES OUTPUT_NAME binkw32)
+
+    add_game_shim(driversanfrancisco_shim "src/games/driver/adapter.cpp;src/games/driver/identity.cpp" src/games/driver/proxy_exports.def)
+    set_target_properties(driversanfrancisco_shim PROPERTIES OUTPUT_NAME binkw32)
+
+    add_game_shim(splintercellconviction_shim "src/games/conviction/adapter.cpp;src/games/conviction/agora.cpp;src/games/conviction/orbit.cpp;src/games/common/agora_root_key.cpp" src/games/conviction/proxy_exports.def)
+    set_target_properties(splintercellconviction_shim PROPERTIES OUTPUT_NAME binkw32)
 else()
     add_game_shim(farcry4_shim src/games/farcry4/adapter.cpp src/games/farcry4/proxy_exports.def)
     set_target_properties(farcry4_shim PROPERTIES OUTPUT_NAME bink2w64)
 
     add_game_shim(farcry5_shim "src/games/farcry5/adapter.cpp;src/games/farcry5/cng_debug.cpp;src/games/common/fc_m64_debug.cpp;src/games/common/uplay_debug.cpp" src/games/farcry5/proxy_exports.def)
     set_target_properties(farcry5_shim PROPERTIES OUTPUT_NAME bink2w64)
+
+    add_game_shim(watchdogs_shim "src/games/watchdogs/adapter.cpp;src/games/common/uplay_debug.cpp" src/games/watchdogs/proxy_exports.def)
+    set_target_properties(watchdogs_shim PROPERTIES OUTPUT_NAME bink2w64)
 
     add_game_shim(farcrynewdawn_shim "src/games/newdawn/adapter.cpp;src/games/common/fc_m64_debug.cpp;src/games/common/uplay_debug.cpp" src/games/newdawn/proxy_exports.def)
     set_target_properties(farcrynewdawn_shim PROPERTIES OUTPUT_NAME bink2w64)

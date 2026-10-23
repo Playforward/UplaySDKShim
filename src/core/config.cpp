@@ -140,6 +140,15 @@ HookConfig load_hook_config() {
             const unsigned long port = strtoul(value, nullptr, 0);
             if (port > 65535) shim_log("[config] redirect_http_port '%s' is not a port", value);
             else config.redirect_http_port = static_cast<uint16_t>(port);
+        } else if (_stricmp(key, "redirect_https_port") == 0) {
+            const unsigned long port = strtoul(value, nullptr, 0);
+            if (port > 65535) shim_log("[config] redirect_https_port '%s' is not a port", value);
+            else config.redirect_https_port = static_cast<uint16_t>(port);
+        } else if (_stricmp(key, "agora_root_key") == 0) {
+            if (strlen(value) >= sizeof(config.agora_root_key))
+                shim_log("[config] agora_root_key is longer than %u characters and was ignored",
+                         static_cast<unsigned>(sizeof(config.agora_root_key) - 1));
+            else strncpy_s(config.agora_root_key, value, _TRUNCATE);
         } else if (_stricmp(key, "launch_pipe") == 0) {
             if (!value[0] || strlen(value) >= sizeof(config.launch_pipe))
                 shim_log("[config] launch_pipe must be 1 to %u characters and was ignored",

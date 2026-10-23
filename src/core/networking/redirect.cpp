@@ -285,14 +285,25 @@ int WSAAPI hooked_bind(SOCKET socket, const sockaddr* address, int length) {
 
 int WSAAPI hooked_connect(SOCKET socket, const sockaddr* address, int length) {
     sockaddr_in remapped{};
-    const uint16_t http_port = hook_config().redirect_http_port;
-    if (http_port && is_redirect_address(address, length) &&
-        reinterpret_cast<const sockaddr_in*>(address)->sin_port == htons(80)) {
-        remapped = *reinterpret_cast<const sockaddr_in*>(address);
-        remapped.sin_port = htons(http_port);
-        address = reinterpret_cast<const sockaddr*>(&remapped);
-        length = sizeof(remapped);
-        shim_log("[net] connect to the server's port 80 sent to %u (redirect_http_port)", static_cast<unsigned>(http_port));
+    const struct {
+        uint16_t from;
+        uint16_t to;
+        const char* key;
+    } remaps[] = {
+        {80, hook_config().redirect_http_port, "redirect_http_port"},
+        {443, hook_config().redirect_https_port, "redirect_https_port"},
+    };
+    for (const auto& remap : remaps) {
+        if (remap.to && is_redirect_address(address, length) &&
+            reinterpret_cast<const sockaddr_in*>(address)->sin_port == htons(remap.from)) {
+            remapped = *reinterpret_cast<const sockaddr_in*>(address);
+            remapped.sin_port = htons(remap.to);
+            address = reinterpret_cast<const sockaddr*>(&remapped);
+            length = sizeof(remapped);
+            shim_log("[net] connect to the server's port %u sent to %u (%s)", static_cast<unsigned>(remap.from),
+                     static_cast<unsigned>(remap.to), remap.key);
+            break;
+        }
     }
     if (hook_config().capture_tcp && is_redirect_address(address, length)) track_socket(socket);
     if (hook_config().capture_tcp || hook_config().log_tcp_full) log_packet("connect", address, length, nullptr, 0, false);

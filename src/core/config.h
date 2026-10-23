@@ -50,6 +50,8 @@ struct HookConfig {
     char launch_pipe[64] = "playforward-game-bridge";
     uint16_t bridge_port = 24771;
     uint16_t redirect_http_port = 0;
+    uint16_t redirect_https_port = 0;
+    char agora_root_key[MAX_PATH] = {};
 };
 
 const HookConfig& hook_config();
