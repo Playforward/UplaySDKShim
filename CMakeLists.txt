@@ -73,6 +73,10 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
 
     add_game_shim(splintercellconviction_shim "src/games/conviction/adapter.cpp;src/games/conviction/agora.cpp;src/games/conviction/orbit.cpp;src/games/common/agora_root_key.cpp" src/games/conviction/proxy_exports.def)
     set_target_properties(splintercellconviction_shim PROPERTIES OUTPUT_NAME binkw32)
+
+    # trialsFMX.exe has no Bink: the shim stands in for steam_api.dll.
+    add_game_shim(trialsevolution_shim "src/games/trials/adapter.cpp;src/games/trials/identity.cpp;src/games/trials/game_log.cpp;src/games/trials/track_central.cpp" src/games/trials/proxy_exports.def)
+    set_target_properties(trialsevolution_shim PROPERTIES OUTPUT_NAME steam_api)
 else()
     add_game_shim(farcry4_shim src/games/farcry4/adapter.cpp src/games/farcry4/proxy_exports.def)
     set_target_properties(farcry4_shim PROPERTIES OUTPUT_NAME bink2w64)

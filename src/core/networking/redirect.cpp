@@ -261,7 +261,9 @@ int WSAAPI hooked_bind(SOCKET socket, const sockaddr* address, int length) {
     const bool prudp = is_prudp_listener_bind(address, length);
 
     int result;
-    if (prudp && hook_config().bind_ip_be) {
+    const bool any_address = length >= static_cast<int>(sizeof(sockaddr_in)) && address->sa_family == AF_INET &&
+                             reinterpret_cast<const sockaddr_in*>(address)->sin_addr.s_addr == INADDR_ANY;
+    if (hook_config().bind_ip_be && (prudp || (hook_config().bind_ip_all && any_address))) {
         sockaddr_in replacement = *reinterpret_cast<const sockaddr_in*>(address);
         replacement.sin_addr.s_addr = hook_config().bind_ip_be;
         char before[64] = "?", after[64] = "?";
@@ -640,6 +642,10 @@ void install_iat_hooks(HMODULE game_module) {
             ? patch_iat(game_module, "WS2_32.dll", definition->name, binding.hook) : nullptr;
         if (!original && definition->ordinal)
             original = patch_iat_ordinal(game_module, "WS2_32.dll", definition->ordinal, binding.hook);
+        // Older titles (Trials Evolution) take the classic calls from WSOCK32,
+        // by the same ordinals; its socket/sendto/... share WS2_32's signatures.
+        if (!original && definition->ordinal)
+            original = patch_iat_ordinal(game_module, "WSOCK32.dll", definition->ordinal, binding.hook);
         if (original) { *binding.original = original; ++installed; }
     }
     if (!installed && already) shim_log("[hook] common Winsock IAT hooks already installed");

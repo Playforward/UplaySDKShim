@@ -10,6 +10,10 @@ struct HookConfig {
     uint32_t redirect_ip_be = 0;
     char bind_ip[16] = {};
     uint32_t bind_ip_be = 0;
+    // bind_ip for every socket bound to 0.0.0.0, not only RendezVous's: lets a
+    // second copy of a game on one PC take 127.0.0.2 so its fixed ports do not
+    // collide with the first copy's.
+    bool bind_ip_all = false;
     bool bypass_tls_verify = false;
     uint64_t rva_tls_verify = 0;
     uint32_t tls_verify_stack_bytes = 0;
@@ -21,6 +25,7 @@ struct HookConfig {
     bool dump_module = false;
     bool log_rdv_full = false;
     bool log_tcp_full = false;
+    bool game_log = false;
     bool trace_getprocaddr = false;
     bool trace_cng = false;
     bool trace_cng_payload = false;
